@@ -1,0 +1,9 @@
+Package: com.huhansibuxin.intentshelperquiet
+Name: IntentsHelperQuiet
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Stops intents_helper.xpc from doing full-scan work while keeping ALL image/avatar paths alive. Kills the cold-start schema sweep (154 .appintents), the intentDefinitionURLs enumeration, and purgeExpiredImagesInEphemeralStore's 600+ directory walk over Library/Intents/Images, and optionally skips the PeopleSuggester share-suggestion dlopen. storeImage / retrieveImageWithIdentifier / loadDataImage / purgeImageWithIdentifier / storeUserContext are NEVER hooked - 2026-11-22 proof: hard-disabling intents_helper makes WeChatNotificationServiceExtension SIGSEGV at serviceExtensionTimeWillExpire after INImageServiceConnection storeImage blocks 30s, because the video-call avatar path needs this service. Implemented as pure objc-runtime method_setImplementation with no original-IMP retention (no arm64e PAC double-sign crash) and no substrate/Foundation/UIKit link. Logs per-PID to /var/mobile/Library/Intents/ihq_<pid>.log (SSH: prefix /rootfs/private). Flags in /var/tmp/IntentsHelperQuiet/ (or Library/Intents/IntentsHelperQuiet/): DISABLED, PASSTHROUGH_ALL, KEEP_SHARE, KEEP_SCHEMA_GETTERS.
+Maintainer: huhansibuxin
+Author: huhansibuxin
+Section: Tweaks
+Depends: ellekit

@@ -1,0 +1,8 @@
+dist/
+.theos/
+packages/
+*.deb
+*.dylib
+_chk*/
+*.tar
+logs_return/

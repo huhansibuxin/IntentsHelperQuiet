@@ -1,4 +1,4 @@
-# IntentsHelperQuiet v1.0.0
+# IntentsHelperQuiet v1.0.1
 #   Block ONLY the full-scan surface of intents_helper.xpc
 #   (schema discovery / intentDefinitionURLs / purgeExpiredImagesInEphemeralStore /
 #    optional share suggestion). ALL image & avatar paths are left untouched so

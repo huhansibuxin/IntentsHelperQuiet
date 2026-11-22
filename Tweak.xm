@@ -38,6 +38,15 @@
  *   KEEP_SCHEMA           整体保留 schema 扫描（v1.0.1 新增）
  *   KEEP_SHARE            保留分享建议（PeopleSuggester 那条不拦）
  *   KEEP_SCHEMA_GETTERS   保留 intentDefinitionURLs 两个 getter
+ *   PURGE_TOO             v1.0.2：恢复拦截 purgeExpiredImagesInEphemeralStore
+ *                         （默认不拦，因为它干的是清理活，拦了缓存只增不减）
+ *   HEARTBEAT             v1.0.2：恢复 SNAP 心跳（默认关，避免每实例写几十行）
+ *
+ * v1.0.2 变更（2026-11-22 23:58，微信+分享面板+Siri 全开过的实机结果）：
+ *   1. purgeExpiredImagesInEphemeralStore 默认放行。实测 0 次调用，
+ *      它真实职责是过期清理；拦它只会让 Library/Intents/Images 无限增长
+ *      （观测到 Soul 23:56:24 一次写入 21 张 / 776K）。
+ *   2. 心跳默认关闭，改由 HEARTBEAT flag 开启。
  *
  * v1.0.1 变更（2026-11-22 夜间，实机零命中观察后）：
  *   1. 修 ihq_line 缺 '\n' 导致日志粘成一整行的 bug。
@@ -76,6 +85,14 @@ static char g_logpath[224] = "(none)";
 static int  g_block_schema  = 1;
 static int  g_block_share   = 1;
 static int  g_keep_getters  = 0;
+/* v1.0.2：purgeExpiredImagesInEphemeralStore 默认「不拦」。
+ * 理由（2026-11-22 23:58 实机）：微信+分享面板+Siri 全开过，该方法 0 次调用，
+ * 说明它不是尖峰源；而它的语义是「清理 ephemeral store 里的过期图片」，
+ * 拦掉等于让 Library/Intents/Images 只增不减（已经观测到 Soul 一次性
+ * 写入 21 张 / 776K）。要恢复拦截就 touch PURGE_TOO。 */
+static int  g_block_purge   = 0;
+/* v1.0.2：心跳默认关。v1.0.1 每实例最多写 41 行 SNAP，本身成了新 I/O。 */
+static int  g_heartbeat     = 0;
 
 static void ihq_append(const char *b, size_t n) {
     if (g_logfd < 0) return;
@@ -254,7 +271,12 @@ static void ihq_install(void) {
             ihq_hook_core(cls, "intentDefinitionURLsForBundleID:", (IMP)q_def_urls_bid, 1);
         }
     }
-    ihq_hook(cls, "purgeExpiredImagesInEphemeralStore", (IMP)q_purge_expired);
+    if (g_block_purge) {
+        ihq_hook(cls, "purgeExpiredImagesInEphemeralStore", (IMP)q_purge_expired);
+    } else {
+        ihq_line("KEEP purgeExpiredImagesInEphemeralStore (default since v1.0.2: "
+                 "it performs expiry cleanup, blocking it only grows the cache)");
+    }
     if (g_block_share) {
         ihq_hook(cls, "fetchShareExtensionIntentForExtensionContextUUID:completion:", (IMP)q_share);
     }
@@ -274,7 +296,7 @@ static void *ihq_wait_install(void *arg) {
 
 __attribute__((constructor)) static void ihq_init(void) {
     ihq_open_log();
-    ihq_line("BOOT v1.0.1 pid=%d ppid=%d log=%s", (int)getpid(), (int)getppid(), g_logpath);
+    ihq_line("BOOT v1.0.2 pid=%d ppid=%d log=%s", (int)getpid(), (int)getppid(), g_logpath);
 
     if (ihq_flag("DISABLED") || ihq_flag("PASSTHROUGH_ALL")) {
         ihq_line("FLAG %s -> hooks NOT installed",
@@ -284,17 +306,22 @@ __attribute__((constructor)) static void ihq_init(void) {
     if (ihq_flag("KEEP_SCHEMA"))         g_block_schema = 0;
     if (ihq_flag("KEEP_SHARE"))          g_block_share  = 0;
     if (ihq_flag("KEEP_SCHEMA_GETTERS")) g_keep_getters = 1;
-    ihq_line("CONFIG blockSchema=%d blockShare=%d keepGetters=%d v1.0.1",
-             g_block_schema, g_block_share, g_keep_getters);
+    if (ihq_flag("PURGE_TOO"))           g_block_purge  = 1;
+    if (ihq_flag("HEARTBEAT"))           g_heartbeat    = 1;
+    ihq_line("CONFIG blockSchema=%d blockShare=%d blockPurge=%d keepGetters=%d "
+             "heartbeat=%d v1.0.2",
+             g_block_schema, g_block_share, g_block_purge, g_keep_getters, g_heartbeat);
 
-    /* 心跳先起，保证哪怕后面 install 出问题也能看到实例活着。 */
-    pthread_t hb;
-    pthread_attr_t hba;
-    pthread_attr_init(&hba);
-    pthread_attr_setdetachstate(&hba, PTHREAD_CREATE_DETACHED);
-    if (pthread_create(&hb, &hba, ihq_heartbeat, NULL) != 0)
-        ihq_line("ERROR heartbeat pthread_create errno=%d", errno);
-    pthread_attr_destroy(&hba);
+    /* 心跳只在显式要求时起（v1.0.2 起默认关，避免每实例写几十行日志）。 */
+    if (g_heartbeat) {
+        pthread_t hb;
+        pthread_attr_t hba;
+        pthread_attr_init(&hba);
+        pthread_attr_setdetachstate(&hba, PTHREAD_CREATE_DETACHED);
+        if (pthread_create(&hb, &hba, ihq_heartbeat, NULL) != 0)
+            ihq_line("ERROR heartbeat pthread_create errno=%d", errno);
+        pthread_attr_destroy(&hba);
+    }
 
     if (objc_getClass("INHService")) { ihq_install(); return; }
 
